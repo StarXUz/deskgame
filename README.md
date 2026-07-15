@@ -7,25 +7,17 @@
 - Python 3.10 或更高版本
 - Node.js 18 或更高版本
 - npm
+- Git
 
-## 下载后部署
+## 完整部署流程
+
+### 1. 下载项目
 
 macOS / Linux：
 
 ```bash
 git clone https://github.com/StarXUz/deskgame.git
 cd deskgame
-
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-
-cd frontend
-npm install
-npm run build
-cd ..
-
-uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
 Windows PowerShell：
@@ -33,23 +25,112 @@ Windows PowerShell：
 ```powershell
 git clone https://github.com/StarXUz/deskgame.git
 cd deskgame
+```
 
+### 2. 创建 Python 虚拟环境
+
+macOS / Linux：
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+Windows PowerShell：
+
+```powershell
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+```
 
+如果 Windows 提示不允许运行脚本，先执行：
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+然后重新执行：
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+### 3. 安装后端依赖
+
+macOS / Linux / Windows：
+
+```bash
+pip install -r requirements.txt
+```
+
+### 4. 安装并打包前端
+
+macOS / Linux / Windows：
+
+```bash
 cd frontend
 npm install
 npm run build
 cd ..
+```
 
+### 5. 启动系统
+
+macOS / Linux / Windows：
+
+```bash
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-启动后访问：
+启动后不要关闭这个终端窗口。关闭窗口或按 `Ctrl+C` 会停止系统。
 
-- 管理端：`http://本机局域网IP:8000/admin`
+### 6. 打开系统
+
+本机访问：
+
+- 管理端：`http://127.0.0.1:8000/admin`
 - 后端接口文档：`http://127.0.0.1:8000/docs`
+
+局域网其他设备访问：
+
+- 管理端：`http://你的电脑局域网IP:8000/admin`
+- 裁判端：使用系统生成的选手二维码进入
+
+macOS 查看局域网 IP：
+
+```bash
+ipconfig getifaddr en0
+```
+
+Windows 查看局域网 IP：
+
+```powershell
+ipconfig
+```
+
+在输出中找到当前网络连接的 `IPv4 地址`。
+
+### 7. 第一次使用
+
+1. 进入管理端：`http://127.0.0.1:8000/admin`。
+2. 在“选手导入”上传选手 Excel。
+3. 检查选手、队伍、年级组别、所属游戏等信息。
+4. 在“裁判账号”生成裁判账号。
+5. 在“赛程控制台”选择第 1 轮并生成桌位。
+6. 打印或分发选手二维码。
+7. 裁判扫码进入录分页面，提交本桌成绩。
+8. 每轮结束后继续生成下一轮。
+9. 第 6 轮结束后，在“最终报表”导出 Excel。
+
+### 8. 数据保存位置
+
+首次启动会自动创建本地 SQLite 数据库：
+
+```text
+data/tournament.sqlite3
+```
+
+比赛数据、二维码、导出报表都会保存在部署机器本地，不会自动上传到 GitHub。
 
 ## 开发方式
 
