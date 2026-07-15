@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>裁判账号管理 Demo</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #f4f7fb;
+      color: #1f2937;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+    .shell {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 250px 1fr;
+    }
+    .side {
+      background: #172033;
+      color: #fff;
+      padding: 24px 18px;
+    }
+    .side h1 {
+      margin: 0 0 22px;
+      font-size: 22px;
+    }
+    .nav {
+      display: grid;
+      gap: 8px;
+    }
+    .nav button {
+      border: 0;
+      background: transparent;
+      color: #d4deed;
+      text-align: left;
+      padding: 12px 14px;
+      border-radius: 8px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    .nav button.active {
+      background: #2563eb;
+      color: #fff;
+    }
+    .main {
+      padding: 24px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(360px, 1.05fr) minmax(320px, 0.95fr);
+      gap: 16px;
+      align-items: start;
+    }
+    .panel {
+      background: #fff;
+      border: 1px solid #d9e2ef;
+      border-radius: 8px;
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+    .panel h2 {
+      margin: 0 0 14px;
+      font-size: 19px;
+    }
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+    input, select, textarea {
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 15px;
+      background: #fff;
+      color: #1f2937;
+    }
+    input[type="number"] { width: 120px; }
+    textarea {
+      width: 100%;
+      min-height: 220px;
+      resize: vertical;
+      line-height: 1.6;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    button {
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 10px 14px;
+      background: #fff;
+      color: #1f2937;
+      cursor: pointer;
+      font-size: 15px;
+    }
+    button.primary {
+      border-color: #2563eb;
+      background: #2563eb;
+      color: #fff;
+    }
+    button.warning {
+      border-color: #f59e0b;
+      background: #f59e0b;
+      color: #fff;
+    }
+    button.danger {
+      border-color: #dc2626;
+      background: #dc2626;
+      color: #fff;
+    }
+    button.ghost {
+      background: #f8fafc;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    th, td {
+      border-bottom: 1px solid #e5eaf2;
+      padding: 10px 8px;
+      text-align: left;
+      vertical-align: middle;
+      font-size: 14px;
+    }
+    th {
+      color: #64748b;
+      font-weight: 700;
+      background: #f8fafc;
+    }
+    td input {
+      width: 100%;
+      padding: 8px 10px;
+    }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      min-width: 52px;
+      justify-content: center;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .enabled { background: #dcfce7; color: #166534; }
+    .disabled { background: #fee2e2; color: #991b1b; }
+    .muted {
+      color: #64748b;
+      font-size: 14px;
+    }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .metric {
+      background: #fff;
+      border: 1px solid #d9e2ef;
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .metric strong {
+      display: block;
+      font-size: 24px;
+      margin-top: 4px;
+    }
+    .toast {
+      position: fixed;
+      right: 24px;
+      bottom: 24px;
+      background: #172033;
+      color: #fff;
+      padding: 12px 16px;
+      border-radius: 8px;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: 0.2s ease;
+      pointer-events: none;
+    }
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .records {
+      max-height: 440px;
+      overflow: auto;
+    }
+    .action-row {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    @media (max-width: 1100px) {
+      .shell { grid-template-columns: 1fr; }
+      .side { position: static; }
+      .grid { grid-template-columns: 1fr; }
+      .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="side">
+      <h1>裁判账号管理 Demo</h1>
+      <div class="nav">
+        <button class="active">账号管理</button>
+        <button>提交监管</button>
+        <button>微信群文本</button>
+      </div>
+    </aside>
+    <main class="main">
+      <div class="cards">
+        <div class="metric"><span class="muted">账号总数</span><strong id="totalCount">0</strong></div>
+        <div class="metric"><span class="muted">已领取</span><strong id="claimedCount">0</strong></div>
+        <div class="metric"><span class="muted">已启用</span><strong id="enabledCount">0</strong></div>
+        <div class="metric"><span class="muted">今日提交</span><strong id="submitCount">0</strong></div>
+      </div>
+
+      <div class="grid">
+        <section class="panel">
+          <h2>批量生成裁判账号</h2>
+          <div class="toolbar">
+            <label>数量 <input id="generateCount" type="number" min="1" max="200" value="20" /></label>
+            <button class="primary" id="generateBtn">生成账号</button>
+            <button class="ghost" id="copyBtn">复制微信群文本</button>
+            <button class="warning" id="simulateBtn">模拟提交记录</button>
+          </div>
+          <p class="muted">账号格式为 J001、J002；密码为 6 位数字。领取人可以在群接龙后由管理员补录。</p>
+        </section>
+
+        <section class="panel">
+          <h2>微信群领取文本</h2>
+          <textarea id="groupText" readonly></textarea>
+        </section>
+      </div>
+
+      <section class="panel">
+        <h2>裁判账号列表</h2>
+        <div class="toolbar">
+          <input id="searchInput" placeholder="搜索账号、领取人、备注" />
+          <select id="statusFilter">
+            <option value="">全部状态</option>
+            <option value="enabled">启用</option>
+            <option value="disabled">禁用</option>
+          </select>
+          <button id="disableAllBtn" class="danger">全部禁用</button>
+          <button id="enableAllBtn">全部启用</button>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 90px">账号</th>
+              <th style="width: 100px">密码</th>
+              <th style="width: 150px">领取人</th>
+              <th>备注</th>
+              <th style="width: 90px">状态</th>
+              <th style="width: 130px">提交次数</th>
+              <th style="width: 230px">操作</th>
+            </tr>
+          </thead>
+          <tbody id="judgeRows"></tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <h2>成绩提交监管</h2>
+        <div class="records">
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 80px">轮次</th>
+                <th style="width: 90px">座位</th>
+                <th style="width: 110px">桌号</th>
+                <th>裁判账号</th>
+                <th>领取人</th>
+                <th style="width: 150px">提交时间</th>
+                <th>分数</th>
+              </tr>
+            </thead>
+            <tbody id="recordRows"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+  <div class="toast" id="toast">已复制</div>
+
+  <script>
+    const judges = []
+    const records = []
+
+    const names = ["张老师", "李同学", "王志愿者", "陈老师", "赵同学", "刘志愿者"]
+
+    function password() {
+      return String(Math.floor(100000 + Math.random() * 900000))
+    }
+
+    function nextAccount(index) {
+      return `J${String(index).padStart(3, "0")}`
+    }
+
+    function showToast(text) {
+      const toast = document.getElementById("toast")
+      toast.textContent = text
+      toast.classList.add("show")
+      setTimeout(() => toast.classList.remove("show"), 1600)
+    }
+
+    function renderMetrics() {
+      document.getElementById("totalCount").textContent = judges.length
+      document.getElementById("claimedCount").textContent = judges.filter(j => j.claimedBy.trim()).length
+      document.getElementById("enabledCount").textContent = judges.filter(j => j.enabled).length
+      document.getElementById("submitCount").textContent = records.length
+    }
+
+    function groupText() {
+      const lines = [
+        "裁判账号领取表",
+        "请接龙：姓名 + 领取账号",
+        "",
+        ...judges.map(j => `${j.account} / ${j.password}`)
+      ]
+      return lines.join("\n")
+    }
+
+    function renderGroupText() {
+      document.getElementById("groupText").value = groupText()
+    }
+
+    function filteredJudges() {
+      const keyword = document.getElementById("searchInput").value.trim().toLowerCase()
+      const status = document.getElementById("statusFilter").value
+      return judges.filter(j => {
+        const statusOk = !status || (status === "enabled" ? j.enabled : !j.enabled)
+        const text = `${j.account} ${j.claimedBy} ${j.note}`.toLowerCase()
+        return statusOk && (!keyword || text.includes(keyword))
+      })
+    }
+
+    function renderJudges() {
+      const body = document.getElementById("judgeRows")
+      body.innerHTML = ""
+      filteredJudges().forEach(judge => {
+        const tr = document.createElement("tr")
+        tr.innerHTML = `
+          <td><strong>${judge.account}</strong></td>
+          <td>${judge.password}</td>
+          <td><input data-account="${judge.account}" data-field="claimedBy" value="${judge.claimedBy}" placeholder="领取人姓名" /></td>
+          <td><input data-account="${judge.account}" data-field="note" value="${judge.note}" placeholder="手机号/负责区域/备注" /></td>
+          <td><span class="status ${judge.enabled ? "enabled" : "disabled"}">${judge.enabled ? "启用" : "禁用"}</span></td>
+          <td>${records.filter(r => r.account === judge.account).length}</td>
+          <td>
+            <div class="action-row">
+              <button data-action="toggle" data-account="${judge.account}">${judge.enabled ? "禁用" : "启用"}</button>
+              <button data-action="reset" data-account="${judge.account}">重置密码</button>
+              <button data-action="record" data-account="${judge.account}">看记录</button>
+            </div>
+          </td>
+        `
+        body.appendChild(tr)
+      })
+      body.querySelectorAll("input").forEach(input => {
+        input.addEventListener("input", () => {
+          const judge = judges.find(j => j.account === input.dataset.account)
+          judge[input.dataset.field] = input.value
+          renderMetrics()
+        })
+      })
+      body.querySelectorAll("button").forEach(button => {
+        button.addEventListener("click", () => {
+          const judge = judges.find(j => j.account === button.dataset.account)
+          if (button.dataset.action === "toggle") {
+            judge.enabled = !judge.enabled
+            showToast(`${judge.account} 已${judge.enabled ? "启用" : "禁用"}`)
+          }
+          if (button.dataset.action === "reset") {
+            judge.password = password()
+            showToast(`${judge.account} 密码已重置`)
+          }
+          if (button.dataset.action === "record") {
+            document.getElementById("searchInput").value = judge.account
+            showToast(`已筛选 ${judge.account}`)
+          }
+          render()
+        })
+      })
+    }
+
+    function renderRecords() {
+      const body = document.getElementById("recordRows")
+      body.innerHTML = ""
+      records.forEach(record => {
+        const judge = judges.find(j => j.account === record.account)
+        const tr = document.createElement("tr")
+        tr.innerHTML = `
+          <td>第${record.round}轮</td>
+          <td>${record.seat}</td>
+          <td>${record.table}</td>
+          <td>${record.account}</td>
+          <td>${judge?.claimedBy || "-"}</td>
+          <td>${record.time}</td>
+          <td>${record.scores}</td>
+        `
+        body.appendChild(tr)
+      })
+    }
+
+    function render() {
+      renderMetrics()
+      renderGroupText()
+      renderJudges()
+      renderRecords()
+    }
+
+    function generate(count) {
+      const start = judges.length + 1
+      for (let i = 0; i < count; i++) {
+        judges.push({
+          account: nextAccount(start + i),
+          password: password(),
+          claimedBy: "",
+          note: "",
+          enabled: true
+        })
+      }
+      render()
+    }
+
+    function simulateRecord() {
+      const usable = judges.filter(j => j.enabled)
+      if (!usable.length) {
+        showToast("没有启用的账号")
+        return
+      }
+      const judge = usable[Math.floor(Math.random() * usable.length)]
+      if (!judge.claimedBy) judge.claimedBy = names[Math.floor(Math.random() * names.length)]
+      const index = records.length + 1
+      records.unshift({
+        round: 1 + (index % 3),
+        seat: String(1 + (index % 113)).padStart(3, "0"),
+        table: `R${1 + (index % 3)}-${String(index % 80 || 80).padStart(2, "0")}`,
+        account: judge.account,
+        time: new Date().toLocaleTimeString("zh-CN", { hour12: false }),
+        scores: "5 / 3 / 1 / 0"
+      })
+      render()
+    }
+
+    document.getElementById("generateBtn").addEventListener("click", () => {
+      generate(Number(document.getElementById("generateCount").value || 20))
+    })
+    document.getElementById("copyBtn").addEventListener("click", async () => {
+      await navigator.clipboard.writeText(groupText())
+      showToast("微信群文本已复制")
+    })
+    document.getElementById("simulateBtn").addEventListener("click", simulateRecord)
+    document.getElementById("disableAllBtn").addEventListener("click", () => {
+      judges.forEach(j => j.enabled = false)
+      render()
+    })
+    document.getElementById("enableAllBtn").addEventListener("click", () => {
+      judges.forEach(j => j.enabled = true)
+      render()
+    })
+    document.getElementById("searchInput").addEventListener("input", renderJudges)
+    document.getElementById("statusFilter").addEventListener("change", renderJudges)
+
+    generate(20)
+  </script>
+</body>
+</html>
