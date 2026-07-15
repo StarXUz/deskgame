@@ -10,12 +10,32 @@
 
 ## 下载后部署
 
+macOS / Linux：
+
 ```bash
 git clone https://github.com/StarXUz/deskgame.git
 cd deskgame
 
 python3 -m venv .venv
 source .venv/bin/activate
+pip install -r requirements.txt
+
+cd frontend
+npm install
+npm run build
+cd ..
+
+uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+Windows PowerShell：
+
+```powershell
+git clone https://github.com/StarXUz/deskgame.git
+cd deskgame
+
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 
 cd frontend
@@ -45,6 +65,8 @@ python scripts/start_dev.py
 - 后端接口：`http://127.0.0.1:8000/docs`
 
 macOS 也可以双击根目录的 `启动前后端.command`。
+
+Windows 可以双击根目录的 `启动前后端.bat`。
 
 ## 正式启动
 

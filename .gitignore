@@ -6,24 +6,23 @@ __pycache__/
 venv/
 env/
 
-# Node / frontend build output
+# Node dependencies / frontend build output
 frontend/node_modules/
 frontend/dist/
-frontend/package-lock.json
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Local runtime data
+# Imported/runtime data
 data/
 exports/
 static/qrcodes/
 static/player_qrcodes/
+test_data/
+
+# Optional local venue/report assets
 static/assets/seat_map.jpg
 templates/*.xlsx
-
-# Local test/demo artifacts
-test_data/
 scripts/build_weekly_report.py
 
 # IDE and OS files
