@@ -12,3 +12,9 @@ class ScoreSubmit(BaseModel):
     token: str
     judge_token: str | None = None
     results: list[ScoreItem] = Field(min_length=1)
+
+
+class ScoreCorrection(BaseModel):
+    operator_name: str = Field(min_length=1, max_length=60)
+    reason: str = Field(min_length=1, max_length=300)
+    results: list[ScoreItem] = Field(min_length=1)

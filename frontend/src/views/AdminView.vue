@@ -451,6 +451,20 @@
               {{ scoreSummary(row.scores) }}
             </template>
           </el-table-column>
+          <el-table-column label="更正" width="180" fixed="right">
+            <template #default="{ row }">
+              <el-popover v-if="row.correction_history?.length" trigger="click" width="320" placement="left">
+                <div v-for="item in row.correction_history" :key="item.id" class="score-correction-history">
+                  <strong>{{ item.operator_name }}</strong> · {{ item.corrected_at }}
+                  <p>{{ item.reason }}</p>
+                </div>
+                <template #reference>
+                  <el-button link type="warning">更正{{ row.correction_count }}次</el-button>
+                </template>
+              </el-popover>
+              <el-button link type="primary" @click="openScoreCorrection(row)">更正成绩</el-button>
+            </template>
+          </el-table-column>
         </el-table>
       </section>
 
@@ -479,6 +493,47 @@
       <template #footer>
         <el-button @click="playerQrDialogVisible = false">关闭</el-button>
         <el-button type="primary" :disabled="!playerQrUrl" @click="copyPlayerQrUrl">复制扫码链接</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="scoreCorrectionDialogVisible" title="管理员成绩更正" width="760px" destroy-on-close>
+      <template v-if="scoreCorrectionTarget">
+        <el-alert
+          type="warning"
+          :closable="false"
+          show-icon
+          title="更正后会立即更新积分榜、团队积分和本轮晋级状态。下一轮桌位已经生成时，系统会拒绝本次更正。"
+        />
+        <div class="score-correction-meta">
+          第{{ scoreCorrectionTarget.round_no }}轮 · {{ scoreCorrectionTarget.table_no }} · {{ scoreCorrectionTarget.age_group }} · {{ scoreCorrectionTarget.game_type }}
+          <el-tag v-if="scoreCorrectionTarget.correction_count" type="warning" size="small">此前已更正 {{ scoreCorrectionTarget.correction_count }} 次</el-tag>
+        </div>
+        <el-table :data="scoreCorrectionResults" size="small" stripe>
+          <el-table-column prop="player_code" label="编号" width="95" />
+          <el-table-column prop="name" label="姓名" min-width="110" />
+          <el-table-column prop="team_name" label="队伍" min-width="140" />
+          <el-table-column label="缺席" width="90">
+            <template #default="{ row }">
+              <el-checkbox v-model="row.absent" @change="toggleCorrectionAbsent(row)" />
+            </template>
+          </el-table-column>
+          <el-table-column label="分数" width="150">
+            <template #default="{ row }">
+              <el-tag v-if="row.absent" type="danger">缺席 0 分</el-tag>
+              <el-select v-else v-model="row.score" style="width: 110px">
+                <el-option v-for="score in scoreOptions" :key="score" :label="`${score} 分`" :value="score" />
+              </el-select>
+            </template>
+          </el-table-column>
+        </el-table>
+        <div class="score-correction-form">
+          <el-input v-model="scoreCorrectionOperator" maxlength="60" show-word-limit placeholder="更正人姓名（必填）" />
+          <el-input v-model="scoreCorrectionReason" maxlength="300" show-word-limit type="textarea" :rows="3" placeholder="更正原因（必填，例如：裁判将两名选手分数填反）" />
+        </div>
+      </template>
+      <template #footer>
+        <el-button @click="scoreCorrectionDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="scoreCorrectionSubmitting" @click="submitScoreCorrection">确认更正</el-button>
       </template>
     </el-dialog>
   </div>
@@ -580,6 +635,39 @@ interface JudgeAccount {
   submission_count: number
 }
 
+interface JudgeSubmissionScore {
+  player_id: number
+  player_code: string | null
+  name: string
+  team_name?: string
+  table_rank: number
+  score: number
+  absent: boolean
+  advanced: boolean
+}
+
+interface JudgeSubmission {
+  table_id: number
+  round_no: number
+  table_no: string
+  seat_no: string | null
+  age_group: string
+  game_type: string
+  account: string
+  judge_name: string
+  claimed_by: string | null
+  submitted_at: string
+  client_ip: string
+  scores: JudgeSubmissionScore[]
+  correction_count: number
+  correction_history: Array<{
+    id: number
+    operator_name: string
+    reason: string
+    corrected_at: string
+  }>
+}
+
 const adminTabs = ['import', 'transition', 'schedule', 'seating', 'progression', 'leaderboard', 'judges', 'export']
 const activeTab = ref(readStoredTab())
 const players = ref<Player[]>([])
@@ -593,7 +681,7 @@ const progressionGroups = ref<AdvancementGroup[]>([])
 const progressionGroupKey = ref('')
 const progressionRoundNo = ref(readStoredProgressionRound())
 const judges = ref<JudgeAccount[]>([])
-const judgeSubmissions = ref<any[]>([])
+const judgeSubmissions = ref<JudgeSubmission[]>([])
 const judgeGroupText = ref('')
 const judgeGenerateCount = ref(20)
 const roundNo = ref(readStoredRound())
@@ -607,6 +695,13 @@ const progressionSearch = ref('')
 const progressionStatusFilter = ref('all')
 const playerQrDialogVisible = ref(false)
 const selectedQrPlayer = ref<Player | null>(null)
+const scoreCorrectionDialogVisible = ref(false)
+const scoreCorrectionTarget = ref<JudgeSubmission | null>(null)
+const scoreCorrectionResults = ref<Array<JudgeSubmissionScore & { absent: boolean; score: number }>>([])
+const scoreCorrectionOperator = ref('')
+const scoreCorrectionReason = ref('')
+const scoreCorrectionSubmitting = ref(false)
+const scoreOptions = [5, 3, 2, 1]
 const importWarnings = ref<string[]>([])
 const roundWarnings = ref<string[]>([])
 const lastImportFile = ref<File | null>(null)
@@ -990,6 +1085,63 @@ async function loadJudges() {
   }
 }
 
+function openScoreCorrection(submission: JudgeSubmission) {
+  scoreCorrectionTarget.value = submission
+  scoreCorrectionResults.value = (submission.scores || []).map((score) => ({
+    ...score,
+    absent: Boolean(score.absent),
+    score: Number(score.score)
+  }))
+  scoreCorrectionOperator.value = ''
+  scoreCorrectionReason.value = ''
+  scoreCorrectionDialogVisible.value = true
+}
+
+function toggleCorrectionAbsent(row: JudgeSubmissionScore & { absent: boolean; score: number }) {
+  if (row.absent) {
+    row.score = 0
+  } else if (!scoreOptions.includes(row.score)) {
+    row.score = 1
+  }
+}
+
+async function submitScoreCorrection() {
+  const target = scoreCorrectionTarget.value
+  if (!target) return
+  if (!scoreCorrectionOperator.value.trim() || !scoreCorrectionReason.value.trim()) {
+    ElMessage.warning('请填写更正人姓名和更正原因')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确认更正第${target.round_no}轮 ${target.table_no} 的成绩？更正后积分和晋级状态会立即同步。`,
+      '确认管理员更正',
+      { type: 'warning', confirmButtonText: '确认更正', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  scoreCorrectionSubmitting.value = true
+  try {
+    const resp = await api.post(`/rounds/${target.round_no}/tables/${target.table_id}/correct-score`, {
+      operator_name: scoreCorrectionOperator.value.trim(),
+      reason: scoreCorrectionReason.value.trim(),
+      results: scoreCorrectionResults.value.map((row) => ({
+        player_id: row.player_id,
+        score: row.absent ? 0 : row.score,
+        absent: row.absent
+      }))
+    })
+    ElMessage.success(resp.data.message)
+    scoreCorrectionDialogVisible.value = false
+    await Promise.all([loadJudges(), refreshLeaderboards(), loadTables(), loadSeatingChart(), loadProgressionChart()])
+  } catch (error) {
+    ElMessage.error(errorText(error))
+  } finally {
+    scoreCorrectionSubmitting.value = false
+  }
+}
+
 async function generateJudges() {
   try {
     const resp = await api.post('/judges/generate', { count: judgeGenerateCount.value })
@@ -1096,6 +1248,34 @@ onMounted(() => {
   gap: 10px;
   align-items: center;
   margin-bottom: 12px;
+}
+
+.score-correction-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 16px 0 10px;
+  color: #475569;
+  font-size: 14px;
+}
+
+.score-correction-form {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.score-correction-history + .score-correction-history {
+  border-top: 1px solid #e2e8f0;
+  margin-top: 10px;
+  padding-top: 10px;
+}
+
+.score-correction-history p {
+  margin: 4px 0 0;
+  color: #475569;
+  line-height: 1.45;
 }
 
 .toolbar-search {

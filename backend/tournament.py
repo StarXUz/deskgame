@@ -1371,6 +1371,18 @@ def attach_round_scores(tables: list[dict], round_no: int) -> list[dict]:
                 "is_advanced": bool(score["is_advanced"]) if score else False,
                 "submitted": score is not None,
             }
+        if table["judge_submission"]:
+            table["judge_submission"]["scores"] = [
+                {
+                    "player_id": int(player["id"]),
+                    "score": scores_by_player[int(player["id"])]["round_score"],
+                    "rank": scores_by_player[int(player["id"])]["table_rank"],
+                    "absent": bool(scores_by_player[int(player["id"])]["is_absent"]),
+                    "advanced": bool(scores_by_player[int(player["id"])]["is_advanced"]),
+                }
+                for player in table["players"]
+                if int(player["id"]) in scores_by_player
+            ]
     return tables
 
 
@@ -1685,9 +1697,53 @@ def list_judge_submissions() -> list[dict]:
             ORDER BY js.submitted_at DESC, js.id DESC
             """
         ).fetchall()
+        table_ids = sorted({int(row["table_id"]) for row in rows})
+        current_scores_by_table: dict[int, list[dict]] = {}
+        corrections_by_table: dict[int, list[dict]] = {}
+        if table_ids:
+            placeholders = ",".join("?" for _ in table_ids)
+            score_rows = conn.execute(
+                f"""
+                SELECT s.table_id, s.player_id, s.table_rank, s.round_score, s.is_absent, s.is_advanced,
+                       p.name, p.player_code, p.team_name
+                FROM scores s
+                JOIN players p ON p.id = s.player_id
+                WHERE s.table_id IN ({placeholders})
+                ORDER BY s.table_id, s.table_rank, s.player_id
+                """,
+                tuple(table_ids),
+            ).fetchall()
+            for score in score_rows:
+                item = dict(score)
+                # Keep the score submission API stable after loading corrected values from scores.
+                item["rank"] = item.pop("table_rank")
+                item["score"] = item.pop("round_score")
+                item["absent"] = bool(item.pop("is_absent"))
+                item["advanced"] = bool(item.pop("is_advanced"))
+                current_scores_by_table.setdefault(int(item["table_id"]), []).append(item)
+
+            correction_rows = conn.execute(
+                f"""
+                SELECT id, table_id, operator_name, reason, corrected_at, old_scores_json, new_scores_json
+                FROM score_corrections
+                WHERE table_id IN ({placeholders})
+                ORDER BY corrected_at DESC, id DESC
+                """,
+                tuple(table_ids),
+            ).fetchall()
+            for correction in correction_rows:
+                item = dict(correction)
+                item["old_scores"] = json.loads(item.pop("old_scores_json") or "[]")
+                item["new_scores"] = json.loads(item.pop("new_scores_json") or "[]")
+                corrections_by_table.setdefault(int(item["table_id"]), []).append(item)
+
     items = []
     for row in rows_to_dicts(rows):
-        row["scores"] = json.loads(row.pop("scores_json") or "[]")
+        table_id = int(row["table_id"])
+        row["original_scores"] = json.loads(row.pop("scores_json") or "[]")
+        row["scores"] = current_scores_by_table.get(table_id, row["original_scores"])
+        row["correction_history"] = corrections_by_table.get(table_id, [])
+        row["correction_count"] = len(row["correction_history"])
         items.append(row)
     return items
 
@@ -1720,6 +1776,64 @@ def score_page_data(token: str) -> dict:
     }
 
 
+def calculate_table_scores(table: Any, results: list[dict]) -> tuple[list[int], dict[int, dict], dict[int, int]]:
+    expected_ids = [int(player_id) for player_id in json.loads(table["player_ids_json"])]
+    result_by_id = {int(item["player_id"]): item for item in results}
+    if set(result_by_id.keys()) != set(expected_ids):
+        raise HTTPException(status_code=400, detail="提交选手名单与桌位不一致")
+
+    present = [item for item in result_by_id.values() if not item.get("absent")]
+    allowed_scores = set(SCORE_MAP[4])
+    submitted_scores = [int(item["score"]) for item in present if item.get("score") is not None]
+    if len(submitted_scores) != len(present):
+        raise HTTPException(status_code=400, detail="请为所有未缺席选手选择分数")
+    if any(score not in allowed_scores for score in submitted_scores):
+        raise HTTPException(status_code=400, detail="分数只能选择：5、3、2、1；缺席为0分")
+
+    ranked_present = sorted(
+        present,
+        key=lambda item: (-int(item["score"]), expected_ids.index(int(item["player_id"]))),
+    )
+    rank_by_id = {int(item["player_id"]): index + 1 for index, item in enumerate(ranked_present)}
+    absent_ids = [player_id for player_id in expected_ids if result_by_id[player_id].get("absent")]
+    for index, player_id in enumerate(absent_ids):
+        rank_by_id[player_id] = len(present) + index + 1
+    return expected_ids, result_by_id, rank_by_id
+
+
+def table_score_snapshot(conn: Any, table: Any) -> list[dict]:
+    expected_ids = [int(player_id) for player_id in json.loads(table["player_ids_json"])]
+    rows = conn.execute(
+        """
+        SELECT s.player_id, s.table_rank, s.round_score, s.is_absent, s.is_advanced,
+               p.name, p.player_code, p.team_name
+        FROM scores s
+        JOIN players p ON p.id = s.player_id
+        WHERE s.table_id = ?
+        """,
+        (table["id"],),
+    ).fetchall()
+    by_id = {int(row["player_id"]): dict(row) for row in rows}
+    snapshot = []
+    for player_id in expected_ids:
+        row = by_id.get(player_id)
+        if not row:
+            continue
+        snapshot.append(
+            {
+                "player_id": player_id,
+                "name": row["name"],
+                "player_code": row["player_code"],
+                "team_name": row["team_name"],
+                "rank": row["table_rank"],
+                "score": row["round_score"],
+                "absent": bool(row["is_absent"]),
+                "advanced": bool(row["is_advanced"]),
+            }
+        )
+    return snapshot
+
+
 def submit_score(payload: dict, client_ip: str = "", user_agent: str = "") -> dict:
     from .security import verify_token
 
@@ -1736,26 +1850,7 @@ def submit_score(payload: dict, client_ip: str = "", user_agent: str = "") -> di
         if table["token"] != payload["token"] or table["submitted_at"] is not None:
             raise HTTPException(status_code=409, detail="本桌成绩已录入，不可重复提交")
 
-        expected_ids = json.loads(table["player_ids_json"])
-        result_by_id = {int(item["player_id"]): item for item in payload["results"]}
-        if set(result_by_id.keys()) != set(expected_ids):
-            raise HTTPException(status_code=400, detail="提交选手名单与桌位不一致")
-
-        present = [item for item in result_by_id.values() if not item.get("absent")]
-        allowed_scores = set(SCORE_MAP[4])
-        submitted_scores = [int(item["score"]) for item in present if item.get("score") is not None]
-        if len(submitted_scores) != len(present):
-            raise HTTPException(status_code=400, detail="请为所有未缺席选手选择分数")
-        if any(score not in allowed_scores for score in submitted_scores):
-            raise HTTPException(status_code=400, detail="分数只能选择：5、3、2、1；缺席为0分")
-        ranked_present = sorted(
-            present,
-            key=lambda item: (-int(item["score"]), expected_ids.index(int(item["player_id"]))),
-        )
-        rank_by_id = {int(item["player_id"]): index + 1 for index, item in enumerate(ranked_present)}
-        absent_ids = [player_id for player_id in expected_ids if result_by_id[player_id].get("absent")]
-        for index, player_id in enumerate(absent_ids):
-            rank_by_id[player_id] = len(present) + index + 1
+        expected_ids, result_by_id, rank_by_id = calculate_table_scores(table, payload["results"])
 
         round_no = conn.execute("SELECT round_no FROM rounds WHERE id = ?", (table["round_id"],)).fetchone()["round_no"]
         for player_id in expected_ids:
@@ -1812,6 +1907,72 @@ def submit_score(payload: dict, client_ip: str = "", user_agent: str = "") -> di
             conn.execute("UPDATE rounds SET status = '已结束' WHERE id = ?", (table["round_id"],))
         conn.execute("COMMIT")
     return {"ok": True, "message": "成绩提交成功"}
+
+
+def correct_score(round_no: int, table_id: int, payload: dict) -> dict:
+    operator_name = clean_cell(payload.get("operator_name"))
+    reason = clean_cell(payload.get("reason"))
+    if not operator_name or not reason:
+        raise HTTPException(status_code=400, detail="请填写更正人和更正原因")
+
+    with get_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        round_id = get_round_id(conn, round_no)
+        table = conn.execute("SELECT * FROM tables WHERE id = ? AND round_id = ?", (table_id, round_id)).fetchone()
+        if not table:
+            raise HTTPException(status_code=404, detail="桌位不存在")
+        if table["submitted_at"] is None:
+            raise HTTPException(status_code=400, detail="本桌尚未提交成绩，不能进行更正")
+        if round_no < 6:
+            next_round_id = get_round_id(conn, round_no + 1)
+            next_round_has_tables = conn.execute("SELECT 1 FROM tables WHERE round_id = ? LIMIT 1", (next_round_id,)).fetchone()
+            if next_round_has_tables:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"第{round_no + 1}轮桌位已生成。为保护后续晋级，本次更正已被阻止；请在生成下一轮前完成成绩更正。",
+                )
+
+        expected_ids, result_by_id, rank_by_id = calculate_table_scores(table, payload["results"])
+        old_scores = table_score_snapshot(conn, table)
+        if len(old_scores) != len(expected_ids):
+            raise HTTPException(status_code=400, detail="本桌成绩数据不完整，无法更正")
+
+        for player_id in expected_ids:
+            item = result_by_id[player_id]
+            absent = bool(item.get("absent"))
+            rank = rank_by_id[player_id]
+            score = 0 if absent else int(item["score"])
+            advanced = is_player_advanced(round_no, int(table["participant_count"]), bool(table["is_bye"]), rank, absent)
+            insert_score(conn, player_id, round_id, table_id, rank, score, absent, advanced)
+
+        if round_no == 5:
+            recompute_round5_advancement(conn, round_id)
+        new_scores = table_score_snapshot(conn, table)
+        original_submission = conn.execute(
+            "SELECT id FROM judge_submissions WHERE table_id = ? ORDER BY id ASC LIMIT 1",
+            (table_id,),
+        ).fetchone()
+        corrected_at = datetime.now().isoformat(timespec="seconds")
+        conn.execute(
+            """
+            INSERT INTO score_corrections(
+                round_id, table_id, original_judge_submission_id, operator_name, reason,
+                corrected_at, old_scores_json, new_scores_json
+            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                round_id,
+                table_id,
+                original_submission["id"] if original_submission else None,
+                operator_name,
+                reason,
+                corrected_at,
+                json.dumps(old_scores, ensure_ascii=False),
+                json.dumps(new_scores, ensure_ascii=False),
+            ),
+        )
+        conn.execute("COMMIT")
+    return {"ok": True, "message": "成绩已更正，积分榜和晋级状态已同步更新", "corrected_at": corrected_at}
 
 
 def leaderboard(limit: int = 0) -> list[dict]:

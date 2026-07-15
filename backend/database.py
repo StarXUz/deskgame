@@ -1,6 +1,8 @@
 import asyncio
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -10,13 +12,17 @@ DB_PATH = DATA_DIR / "tournament.sqlite3"
 write_lock = asyncio.Lock()
 
 
-def get_conn() -> sqlite3.Connection:
+@contextmanager
+def get_conn() -> Iterator[sqlite3.Connection]:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=30, isolation_level=None)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA journal_mode = WAL")
-    return conn
+    try:
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA journal_mode = WAL")
+        yield conn
+    finally:
+        conn.close()
 
 
 def init_db() -> None:
@@ -106,6 +112,21 @@ def init_db() -> None:
                 FOREIGN KEY(table_id) REFERENCES tables(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS score_corrections (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                round_id INTEGER NOT NULL,
+                table_id INTEGER NOT NULL,
+                original_judge_submission_id INTEGER,
+                operator_name TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                corrected_at TEXT NOT NULL,
+                old_scores_json TEXT NOT NULL,
+                new_scores_json TEXT NOT NULL,
+                FOREIGN KEY(round_id) REFERENCES rounds(id) ON DELETE CASCADE,
+                FOREIGN KEY(table_id) REFERENCES tables(id) ON DELETE CASCADE,
+                FOREIGN KEY(original_judge_submission_id) REFERENCES judge_submissions(id) ON DELETE SET NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_players_pool
                 ON players(age_group, game_type, is_active);
             CREATE INDEX IF NOT EXISTS idx_players_code
@@ -126,6 +147,8 @@ def init_db() -> None:
                 ON judge_submissions(judge_id);
             CREATE INDEX IF NOT EXISTS idx_judge_submissions_table
                 ON judge_submissions(table_id);
+            CREATE INDEX IF NOT EXISTS idx_score_corrections_table
+                ON score_corrections(table_id, corrected_at DESC);
             """
         )
         for round_no in range(1, 7):

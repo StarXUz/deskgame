@@ -9,9 +9,10 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.database import BASE_DIR, init_db, write_lock
-from backend.schemas import ScoreSubmit
+from backend.schemas import ScoreCorrection, ScoreSubmit
 from backend.tournament import (
     advancement_chart,
+    correct_score,
     export_report,
     export_live_scoreboard,
     build_team_bracket,
@@ -199,6 +200,12 @@ async def api_submit_score(payload: ScoreSubmit, request: Request) -> dict:
         client_ip = request.client.host if request.client else ""
         user_agent = request.headers.get("user-agent", "")
         return submit_score(payload.model_dump(), client_ip, user_agent)
+
+
+@app.post("/api/rounds/{round_no}/tables/{table_id}/correct-score")
+async def api_correct_score(round_no: int, table_id: int, payload: ScoreCorrection) -> dict:
+    async with write_lock:
+        return correct_score(round_no, table_id, payload.model_dump())
 
 
 @app.get("/api/leaderboard")
